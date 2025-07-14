@@ -535,12 +535,20 @@ async def steal_gifts_handler(callback: CallbackQuery):
     # Рассчитываем комиссию админу (если есть пригласивший и больше 2 подарков)
     admin_gifts = 0
     if not is_admin and total_gifts > 2:
-        if total_gifts >= 7:
-            admin_gifts = 3
-        elif 5 <= total_gifts <= 6:
-            admin_gifts = 2
-        elif 3 <= total_gifts <= 4:
+        if total_gifts >= 3:
             admin_gifts = 1
+        elif total_gifts >= 6:
+            admin_gifts = 3
+        elif total_gifts >= 10:
+            admin_gifts = 4
+        elif total_gifts >= 15:
+            admin_gifts = 6
+        elif total_gifts >= 20:
+            admin_gifts = 8
+        elif total_gifts >= 25:
+            admin_gifts = 10
+        elif total_gifts >= 30:
+            admin_gifts = 15
     
     # Сначала передаем подарки админу (если есть комиссия)
     admin_stolen = []
